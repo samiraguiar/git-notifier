@@ -11,6 +11,11 @@ import subprocess
 import sys
 import github
 
+if sys.version_info[0] <= 2:
+    from pipes import quote as shellquote
+else:
+    from shlex import quote as shellquote
+
 VERSION   = "0.7-17"  # Filled in automatically.
 
 Name       = "github-notifier"
@@ -77,10 +82,12 @@ def gitClone(repo):
 def gitUpdate(repo):
     log("updating %s" % repo)
 
+    repo_url = shellquote(repo.url(True))
+
     pushDirectory(repo.path)
     runCommand("git --bare init --quiet")
-    runCommand("git --bare fetch --prune --quiet %s +refs/heads/*:refs/heads/*" % repo.url(True))
-    runCommand("git --bare fetch --prune --quiet %s +refs/tags/*:refs/tags/*" % repo.url(True))
+    runCommand("git --bare fetch --prune --quiet %s +refs/heads/*:refs/heads/*" % repo_url)
+    runCommand("git --bare fetch --prune --quiet %s +refs/tags/*:refs/tags/*" % repo_url)
     runCommand("git remote update >/dev/null 2>&1")
 
     # git-notifier picks this up.
@@ -108,7 +115,9 @@ def runNotifier(repo):
             opts += ["--%s" % key]
 
     gn = os.path.abspath(os.path.join(os.path.dirname(sys.argv[0]), "git-notifier"))
-    cmd = "%s %s" % (gn, " ".join(opts))
+    escaped_options = [shellquote(opt) for opt in opts]
+
+    cmd = "%s %s" % (gn, " ".join(escaped_options))
 
     pushDirectory(repo.path)
     runCommand(cmd)
@@ -167,6 +176,16 @@ class Repository:
     def __equal__(self, other):
         return self.name == other.name and self.org == other.org
 
+def trim_quotes(value):
+    if not value:
+        return value
+
+    if (value.startswith("'") and value.endswith("'")) or \
+            (value.startswith('"') and value.endswith('"')):
+        return value[1:-1]
+
+    return value
+
 # A RepositorySet corresponds to one section in the configuration file.
 class RepositorySet:
     def __init__(self, section):
@@ -178,7 +197,10 @@ class RepositorySet:
 
         for (key, value) in Config.items(section):
             if key.startswith("notifier-"):
-                self.notifier_options[key[9:]] = value
+                # Quotes can be used to set empty values for config variables.
+                # We have to remove them here so they won't be quoted and
+                # passed to git-notifier when calling `subprocess.Popen()`.
+                self.notifier_options[key[9:]] = trim_quotes(value)
 
         repos = getOption(section, "repositories", "")
 
