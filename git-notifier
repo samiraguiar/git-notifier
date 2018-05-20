@@ -4,6 +4,7 @@ import getpass
 import optparse
 import os
 import quopri
+import shlex
 import shutil
 import smtplib
 import socket
@@ -28,11 +29,13 @@ try:
     from configparser import ConfigParser
     from configparser import NoSectionError
     from configparser import NoOptionError
+    from shlex import quote as shellquote
 except ImportError:
     # Python 2
     from ConfigParser import ConfigParser
     from ConfigParser import NoSectionError
     from ConfigParser import NoOptionError
+    from pipes import quote as shellquote
 
 VERSION   = "0.7-17"  # Filled in automatically.
 
@@ -290,9 +293,19 @@ def error(msg):
     log("Error: %s" % msg)
     sys.exit(1)
 
+def shell_quote(string):
+    # We need to split before quoting, otherwise Git will interpret
+    # the whole string as a Git command.
+    string_list = shlex.split(string, False, os.name == 'posix')
+    return " ".join([shellquote(c) for c in string_list])
+
 def git(args, stdout_to=subprocess.PIPE, all=False):
+    # Even though we'll split again later, we need to turn a list/tuple into a string
+    # because in some cases one element of the list has more than a single argument.
     if isinstance(args, tuple) or isinstance(args, list):
         args = " ".join(args)
+
+    args = shell_quote(args)
 
     try:
         if Config.debug:
